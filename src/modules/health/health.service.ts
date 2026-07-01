@@ -4,9 +4,10 @@ import { Injectable } from '@nestjs/common';
 export class HealthService {
   getHealth() {
     return {
-      success: true,
       message: 'API is running',
-      timestamp: new Date().toISOString(),
+      data: {
+        timestamp: new Date().toISOString(),
+      },
     };
   }
 }
