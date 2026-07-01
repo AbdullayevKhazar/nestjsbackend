@@ -6,6 +6,7 @@ import { appConfig, databaseConfig, jwtConfig } from './config';
 import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database';
 import { HealthModule } from './modules/health/health.module';
+import { UserModule } from './modules/users/users.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { HealthModule } from './modules/health/health.module';
 
     DatabaseModule,
     HealthModule,
+    UserModule,
   ],
 })
 export class AppModule {}
