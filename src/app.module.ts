@@ -7,11 +7,13 @@ import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database';
 import { HealthModule } from './modules/health/health.module';
 import { UserModule } from './modules/users/users.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: '.env',
       cache: true,
       expandVariables: true,
       load: [appConfig, databaseConfig, jwtConfig],
@@ -20,6 +22,7 @@ import { UserModule } from './modules/users/users.module';
 
     DatabaseModule,
     HealthModule,
+    AuthModule,
     UserModule,
   ],
 })
