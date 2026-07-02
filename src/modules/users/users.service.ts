@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import * as bcrypt from 'bcrypt';
 
 import { User, UserDocument } from './schemas/user.schema';
 
@@ -21,33 +22,38 @@ export class UserService {
   }
 
   async findById(id: string) {
-    return this.userModel
-      .findOne({
-        _id: id,
-        isActive: true,
-      })
-      .select('+refreshToken');
+    return this.userModel.findById(id).select('+refreshToken +refreshTokenJti');
   }
 
-  async updateRefreshToken(userId: string, refreshToken: string) {
-    console.log('Updating user:', userId);
-
+  async updateRefreshToken(userId: string, refreshToken: string, refreshTokenJti: string) {
     const result = await this.userModel.updateOne(
       { _id: userId },
       {
         $set: {
           refreshToken,
+          refreshTokenJti,
         },
       },
     );
+    return result;
+  }
 
-    console.log(result);
-
-    const user = await this.userModel.findById(userId).select('+refreshToken');
-
-    console.log('Stored:', user?.refreshToken);
-
-    return user;
+  async updateRefreshTokenAtomic(
+    userId: string,
+    oldJti: string,
+    refreshToken: string,
+    refreshTokenJti: string,
+  ) {
+    const result = await this.userModel.updateOne(
+      { _id: userId, refreshTokenJti: oldJti },
+      {
+        $set: {
+          refreshToken,
+          refreshTokenJti,
+        },
+      },
+    );
+    return result;
   }
 
   async clearRefreshToken(userId: string): Promise<void> {
@@ -56,6 +62,7 @@ export class UserService {
       {
         $set: {
           refreshToken: null,
+          refreshTokenJti: null,
         },
       },
     );
@@ -66,6 +73,10 @@ export class UserService {
   }
 
   async create(data: Partial<User>) {
-    return this.userModel.create(data);
+    const hashedPassword = await bcrypt.hash(data.password!, 10);
+    return this.userModel.create({
+      ...data,
+      password: hashedPassword,
+    });
   }
 }
