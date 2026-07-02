@@ -38,6 +38,13 @@ export class User {
     select: false,
   })
   refreshToken!: string | null;
+
+  @Prop({
+    type: String,
+    default: null,
+    select: false,
+  })
+  refreshTokenJti!: string | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
