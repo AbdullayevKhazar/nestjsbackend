@@ -1,4 +1,6 @@
+import { Type } from 'class-transformer';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { randomUUID } from 'crypto';
 import { HydratedDocument, Types } from 'mongoose';
 import { User } from 'src/modules/users/schemas/user.schema';
 
@@ -82,6 +84,23 @@ export class Customer {
     default: null,
   })
   deletedAt?: Date | null;
+  @Prop({
+    default: () => randomUUID(),
+    unique: true,
+    index: true,
+    Type: String,
+  })
+  publicToken?: string;
+
+  @Prop({
+    Type: Boolean,
+    default: true,
+  })
+  isPublic?: boolean;
+
+  createdAt!: Date;
+
+  updatedAt!: Date;
 }
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);

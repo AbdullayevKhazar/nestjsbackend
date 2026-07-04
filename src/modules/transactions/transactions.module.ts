@@ -20,5 +20,6 @@ import { CustomersModule } from '../customers/customers.module';
   ],
   controllers: [TransactionsController],
   providers: [TransactionsService],
+  exports: [TransactionsService],
 })
 export class TransactionsModule {}

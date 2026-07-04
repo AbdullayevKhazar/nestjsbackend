@@ -59,6 +59,10 @@ export class Transaction {
     default: null,
   })
   deletedAt?: Date | null;
+
+  createdAt!: Date;
+
+  updatedAt!: Date;
 }
 
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);
