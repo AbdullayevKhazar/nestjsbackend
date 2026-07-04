@@ -1,15 +1,13 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 
 import { UserService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { JwtPayload } from '../types/jwt-payload.type';
 import { UserDocument } from '../users/schemas/user.schema';
 import { TokenPair } from '../types/token-pair.type';
-import { Inject } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { jwtConfig as jwtConfiguration } from '../../config';
 import type { StringValue } from 'ms';
@@ -54,36 +52,6 @@ export class AuthService {
     };
   }
 
-  async register(registerDto: RegisterDto) {
-    const existingUser = await this.userService.findByEmail(registerDto.email);
-
-    if (existingUser) {
-      throw new BadRequestException('Email already registered');
-    }
-
-    const user = await this.userService.create({
-      fullName: registerDto.fullName,
-      email: registerDto.email,
-      password: registerDto.password,
-    });
-
-    const tokens = await this.generateTokens(user);
-
-    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
-
-    await this.userService.updateRefreshToken(user.id, hashedRefreshToken, tokens.jti);
-
-    return {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      user: {
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email,
-      },
-    };
-  }
-
   async login(loginDto: LoginDto) {
     const user = await this.userService.findByEmail(loginDto.email);
 
@@ -104,7 +72,11 @@ export class AuthService {
 
     const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
-    await this.userService.updateRefreshToken(user.id, hashedRefreshToken, tokens.jti);
+    await this.userService.updateRefreshToken(
+      user.id,
+      hashedRefreshToken,
+      tokens.jti,
+    );
 
     return {
       accessToken: tokens.accessToken,
@@ -121,9 +93,12 @@ export class AuthService {
     let payload: JwtPayload & { jti: string };
 
     try {
-      payload = await this.jwtService.verifyAsync<JwtPayload & { jti: string }>(refreshToken, {
-        secret: this.jwtConfig.refreshSecret,
-      });
+      payload = await this.jwtService.verifyAsync<JwtPayload & { jti: string }>(
+        refreshToken,
+        {
+          secret: this.jwtConfig.refreshSecret,
+        },
+      );
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -140,12 +115,11 @@ export class AuthService {
       throw new UnauthorizedException('Access denied');
     }
 
-    // REUSE DETECTION: If the token's jti doesn't match the stored jti,
-    // this means the token was already rotated. Someone might be trying to reuse it!
     if (user.refreshTokenJti !== jti) {
-      // Potential token theft! Clear all tokens and force re-login.
       await this.userService.clearRefreshToken(user.id);
-      throw new UnauthorizedException('Token reuse detected. Please login again.');
+      throw new UnauthorizedException(
+        'Token reuse detected. Please login again.',
+      );
     }
 
     const isRefreshTokenValid = await bcrypt.compare(
@@ -172,7 +146,9 @@ export class AuthService {
 
     if (updateResult.modifiedCount === 0) {
       // Another request already used this token and rotated it.
-      throw new UnauthorizedException('Refresh token already used. Please login again.');
+      throw new UnauthorizedException(
+        'Refresh token already used. Please login again.',
+      );
     }
 
     return {

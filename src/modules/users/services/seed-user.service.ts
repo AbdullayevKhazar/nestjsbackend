@@ -16,12 +16,19 @@ export class SeedUserService implements OnApplicationBootstrap {
       return;
     }
 
-    await this.userService.create({
-      fullName: 'Administrator',
-      email: 'admin@local.com',
-      password: '12345678',
-    });
-
-    this.logger.log('✅ Default admin created');
+    try {
+      await this.userService.create({
+        fullName: 'Administrator',
+        email: 'admin@local.com',
+        password: '12345678',
+      });
+      this.logger.log('✅ Default admin created');
+    } catch (error: any) {
+      if (error.code === 11000) {
+        this.logger.log('Admin user already exists. Skipping seed.');
+      } else {
+        this.logger.error('Failed to seed admin user', error.message);
+      }
+    }
   }
 }

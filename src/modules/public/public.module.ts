@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 
-import { BackupController } from './backup.controller';
-import { BackupService } from './backup.service';
+import { PublicController } from './public.controller';
+import { PublicService } from './public.service';
 
 import { Customer, CustomerSchema } from '../customers/schemas/customer.schema';
 
@@ -24,7 +24,7 @@ import {
       },
     ]),
   ],
-  controllers: [BackupController],
-  providers: [BackupService],
+  controllers: [PublicController],
+  providers: [PublicService],
 })
-export class BackupModule {}
+export class PublicModule {}
