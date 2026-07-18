@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
-import { appConfig, databaseConfig, jwtConfig } from './config';
+import { appConfig, databaseConfig, jwtConfig, encryptionConfig } from './config';
 
 import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database';
@@ -13,6 +13,10 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { PublicModule } from './modules/public/public.module';
 import { BackupModule } from './modules/backup/backup.module';
+import { EncryptionModule } from './modules/encryption/encryption.module';
+import { FinancialEventsModule } from './modules/events/financial-events.module';
+import { MigrationModule } from './modules/migration/migration.module';
+import { RemindersModule } from './modules/reminders/reminders.module';
 
 @Module({
   imports: [
@@ -21,7 +25,7 @@ import { BackupModule } from './modules/backup/backup.module';
       envFilePath: '.env',
       cache: true,
       expandVariables: true,
-      load: [appConfig, databaseConfig, jwtConfig],
+      load: [appConfig, databaseConfig, jwtConfig, encryptionConfig],
       validationSchema: envValidationSchema,
     }),
 
@@ -34,6 +38,10 @@ import { BackupModule } from './modules/backup/backup.module';
     ReportsModule,
     PublicModule,
     BackupModule,
+    EncryptionModule,
+    FinancialEventsModule,
+    MigrationModule,
+    RemindersModule,
   ],
 })
 export class AppModule {}

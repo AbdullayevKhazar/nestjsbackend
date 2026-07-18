@@ -12,6 +12,7 @@ import {
   Transaction,
   TransactionDocument,
 } from '../transactions/schemas/transaction.schema';
+import { EncryptionService } from '../encryption/encryption.service';
 
 @Injectable()
 export class PublicService {
@@ -21,6 +22,8 @@ export class PublicService {
 
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
+
+    private readonly encryptionService: EncryptionService,
   ) {}
 
   async findCustomer(token: string) {
@@ -47,11 +50,23 @@ export class PublicService {
       })
       .lean();
 
+    // Decrypt amounts for response
+    const decryptedTransactions = transactions.map((tx: any) => ({
+      ...tx,
+      amount: this.encryptionService.decrypt<number>(
+        tx.amount ?? 'v1:aaaa:aaaa:MA==',
+      ),
+    }));
+
+    const balance = this.encryptionService.decrypt<number>(
+      customer.balance ?? 'v1:aaaa:aaaa:MA==',
+    );
+
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     const isOverdue =
-      customer.balance > 0 &&
+      balance > 0 &&
       (!customer.lastTransactionAt ||
         customer.lastTransactionAt < sevenDaysAgo);
 
@@ -62,10 +77,10 @@ export class PublicService {
         phone: customer.phone,
         location: customer.location,
         note: customer.note,
-        balance: customer.balance,
+        balance,
         isOverdue,
       },
-      transactions,
+      transactions: decryptedTransactions,
     };
   }
 }

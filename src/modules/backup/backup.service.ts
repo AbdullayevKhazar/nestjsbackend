@@ -10,6 +10,7 @@ import {
   Transaction,
   TransactionDocument,
 } from '../transactions/schemas/transaction.schema';
+import { EncryptionService } from '../encryption/encryption.service';
 
 // ---------------------------------------------------------------------------
 // Constants (no magic strings)
@@ -90,13 +91,16 @@ interface LeanCustomer {
   location?: string | null;
   note?: string | null;
   createdAt: Date;
+  balance?: string;
+  totalDebt?: string;
+  totalPaid?: string;
 }
 
 interface LeanTransaction {
   _id: Types.ObjectId;
   customerId: Types.ObjectId;
   type: string;
-  amount: number;
+  amount: string; // encrypted
   note?: string | null;
   date: Date;
   createdAt: Date;
@@ -110,6 +114,8 @@ export class BackupService {
 
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
+
+    private readonly encryptionService: EncryptionService,
   ) {}
 
   // =========================================================================
@@ -149,7 +155,9 @@ export class BackupService {
       id: index + 1,
       debtor_id: customerIdToIndex.get(tx.customerId.toString()),
       type: tx.type,
-      amount: tx.amount,
+      amount: this.encryptionService.decrypt<number>(
+        tx.amount ?? 'v1:aaaa:aaaa:MA==',
+      ),
       note: tx.note ?? '',
       date: tx.date.getTime(),
       created_at: tx.createdAt.getTime(),
@@ -320,6 +328,10 @@ export class BackupService {
     userId: Types.ObjectId,
     existingCustomers: Map<string, LeanCustomer>,
   ): Promise<{ remap: Map<number, Types.ObjectId>; insertedCount: number }> {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[DEBUG-BACKUP] importCustomers() START. debtors=${debtors.length}`,
+    );
     const remap = new Map<number, Types.ObjectId>();
     const toInsert: Array<{ debtorId: number; doc: CustomerDocumentPayload }> =
       [];
@@ -343,15 +355,33 @@ export class BackupService {
 
     let insertedCount = 0;
     if (toInsert.length > 0) {
-      const inserted = await this.customerModel.insertMany(
-        toInsert.map((item) => item.doc),
+      // eslint-disable-next-line no-console
+      console.log(
+        `[DEBUG-BACKUP] importCustomers() encrypting ${toInsert.length} docs before insertMany.`,
       );
+      const encryptedDocs = toInsert.map((item) => {
+        const doc = item.doc;
+        return {
+          ...doc,
+          balance: this.encryptionService.encrypt(doc.balance),
+          totalDebt: this.encryptionService.encrypt(doc.totalDebt),
+          totalPaid: this.encryptionService.encrypt(doc.totalPaid),
+        };
+      });
+      const inserted = await this.customerModel.insertMany(encryptedDocs);
       insertedCount = inserted.length;
+      // eslint-disable-next-line no-console
+      console.log(
+        `[DEBUG-BACKUP] importCustomers() insertMany complete. ` +
+          `First inserted balance=${JSON.stringify((inserted[0] as any).balance)}`,
+      );
       inserted.forEach((customer, index) => {
         remap.set(toInsert[index].debtorId, customer._id as Types.ObjectId);
       });
     }
 
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG-BACKUP] importCustomers() END`);
     return { remap, insertedCount };
   }
 
@@ -388,11 +418,14 @@ export class BackupService {
 
     const keys = new Set<string>();
     for (const tx of transactions) {
+      const amount = this.encryptionService.decrypt<number>(
+        tx.amount ?? 'v1:aaaa:aaaa:MA==',
+      );
       keys.add(
         this.buildTransactionKey(
           tx.customerId,
           tx.type,
-          tx.amount,
+          amount,
           tx.date,
           tx.note ?? '',
         ),
@@ -458,7 +491,17 @@ export class BackupService {
     documents: TransactionDocumentPayload[],
   ): Promise<void> {
     if (documents.length === 0) return;
-    await this.transactionModel.insertMany(documents);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[DEBUG-BACKUP] importTransactions() encrypting ${documents.length} docs before insertMany.`,
+    );
+    const encryptedDocs = documents.map((doc) => ({
+      ...doc,
+      amount: this.encryptionService.encrypt(doc.amount),
+    }));
+    await this.transactionModel.insertMany(encryptedDocs);
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG-BACKUP] importTransactions() insertMany complete`);
   }
 
   // =========================================================================
@@ -469,6 +512,13 @@ export class BackupService {
     newTransactions: TransactionDocumentPayload[],
   ): Promise<void> {
     if (newTransactions.length === 0) return;
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `[DEBUG-BACKUP] recalculateCustomerStats() START. ` +
+        `WARNING: bulkWrite bypasses ALL Mongoose middleware. ` +
+        `Financial fields will be written as PLAINTEXT numbers.`,
+    );
 
     const affectedCustomerIds = Array.from(
       new Set(newTransactions.map((tx) => tx.customerId.toString())),
@@ -486,24 +536,39 @@ export class BackupService {
 
     const stats = this.aggregateCustomerStats(allTransactions);
 
-    const bulkOps = [...stats.entries()].map(([customerId, stat]) => ({
-      updateOne: {
-        filter: { _id: new Types.ObjectId(customerId) },
-        update: {
-          $set: {
-            totalDebt: stat.totalDebt,
-            totalPaid: stat.totalPaid,
-            balance: stat.totalDebt - stat.totalPaid,
-            lastTransactionAt: stat.lastTransactionAt,
-            lastPaymentAt: stat.lastPaymentAt,
+    const bulkOps = [...stats.entries()].map(([customerId, stat]) => {
+      const balance = stat.totalDebt - stat.totalPaid;
+      return {
+        updateOne: {
+          filter: { _id: new Types.ObjectId(customerId) },
+          update: {
+            $set: {
+              balance: this.encryptionService.encrypt(balance),
+              totalDebt: this.encryptionService.encrypt(stat.totalDebt),
+              totalPaid: this.encryptionService.encrypt(stat.totalPaid),
+              hasDebt: balance > 0,
+              lastTransactionAt: stat.lastTransactionAt,
+              lastPaymentAt: stat.lastPaymentAt,
+            },
           },
         },
-      },
-    }));
+      };
+    });
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `[DEBUG-BACKUP] recalculateCustomerStats() bulkWrite ops=${bulkOps.length}. ` +
+        `Sample op: balance=${bulkOps[0]?.updateOne.update.$set.balance}, ` +
+        `totalDebt=${bulkOps[0]?.updateOne.update.$set.totalDebt}, ` +
+        `totalPaid=${bulkOps[0]?.updateOne.update.$set.totalPaid}`,
+    );
 
     if (bulkOps.length > 0) {
-      await this.customerModel.bulkWrite(bulkOps, { ordered: false });
+      await this.customerModel.bulkWrite(bulkOps as any, { ordered: false });
     }
+
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG-BACKUP] recalculateCustomerStats() END`);
   }
 
   private aggregateCustomerStats(
@@ -523,16 +588,20 @@ export class BackupService {
       }
       const stat = stats.get(key)!;
 
+      const amount = this.encryptionService.decrypt<number>(
+        tx.amount ?? 'v1:aaaa:aaaa:MA==',
+      );
+
       // lastTransactionAt = latest date among ALL transactions.
       if (!stat.lastTransactionAt || tx.date > stat.lastTransactionAt) {
         stat.lastTransactionAt = tx.date;
       }
 
       if (tx.type === TRANSACTION_TYPE_DEBT) {
-        stat.totalDebt += tx.amount;
+        stat.totalDebt += amount;
       } else {
         // Preserve original semantics: any non-debt transaction is a payment.
-        stat.totalPaid += tx.amount;
+        stat.totalPaid += amount;
         if (!stat.lastPaymentAt || tx.date > stat.lastPaymentAt) {
           stat.lastPaymentAt = tx.date;
         }

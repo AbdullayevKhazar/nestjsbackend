@@ -4,23 +4,36 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { PublicController } from './public.controller';
 import { PublicService } from './public.service';
 
-import { Customer, CustomerSchema } from '../customers/schemas/customer.schema';
-
+import {
+  Customer,
+  CustomerSchema,
+  configureCustomerSchema,
+} from '../customers/schemas/customer.schema';
 import {
   Transaction,
   TransactionSchema,
+  configureTransactionSchema,
 } from '../transactions/schemas/transaction.schema';
+import { EncryptionService } from '../encryption/encryption.service';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([
+    MongooseModule.forFeatureAsync([
       {
         name: Customer.name,
-        schema: CustomerSchema,
+        useFactory: (encryptionService: EncryptionService) => {
+          configureCustomerSchema(CustomerSchema, encryptionService);
+          return CustomerSchema;
+        },
+        inject: [EncryptionService],
       },
       {
         name: Transaction.name,
-        schema: TransactionSchema,
+        useFactory: (encryptionService: EncryptionService) => {
+          configureTransactionSchema(TransactionSchema, encryptionService);
+          return TransactionSchema;
+        },
+        inject: [EncryptionService],
       },
     ]),
   ],
