@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { UserModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { CookieService } from './cookie.service';
 import { jwtConfig } from 'src/config';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -26,6 +27,6 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 
   controllers: [AuthController],
 
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, CookieService, JwtStrategy],
 })
 export class AuthModule {}

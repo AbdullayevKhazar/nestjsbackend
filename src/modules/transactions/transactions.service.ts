@@ -9,6 +9,8 @@ import { CustomersService } from '../customers/customers.service';
 import { TransactionQueryDto } from './dto/transaction-query.dto';
 import { TransactionType } from './enum/transaction-type.enum';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
+import { EncryptionService } from '../encryption/encryption.service';
+import { ReportProjectionsService } from '../reports/report-projections.service';
 
 @Injectable()
 export class TransactionsService {
@@ -17,9 +19,15 @@ export class TransactionsService {
     private readonly transactionModel: Model<TransactionDocument>,
 
     private readonly customersService: CustomersService,
+    private readonly encryptionService: EncryptionService,
+    private readonly projectionsService: ReportProjectionsService,
   ) {}
 
   async create(dto: CreateTransactionDto, userId: string) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[DEBUG-SERVICE] TransactionsService.create() START. amount=${dto.amount} type=${dto.type}`,
+    );
     const customer = await this.customersService.findOne(
       dto.customerId,
       userId,
@@ -30,7 +38,6 @@ export class TransactionsService {
     }
 
     const transactionDate = dto.date ? new Date(dto.date) : new Date();
-
     transactionDate.setHours(0, 0, 0, 0);
 
     const transaction = await this.transactionModel.create({
@@ -42,13 +49,43 @@ export class TransactionsService {
       createdBy: new Types.ObjectId(userId),
     });
 
+    // eslint-disable-next-line no-console
+    console.log(
+      `[DEBUG-SERVICE] TransactionsService.create() AFTER create(). ` +
+        `raw amount=${JSON.stringify((transaction as any).amount)}`,
+    );
+
     if (dto.type === 'debt') {
-      await this.customersService.increaseDebt(dto.customerId, dto.amount);
+      await this.customersService.increaseDebt(
+        dto.customerId,
+        dto.amount,
+        transaction._id.toString(),
+      );
     } else {
-      await this.customersService.increasePayment(dto.customerId, dto.amount);
+      await this.customersService.increasePayment(
+        dto.customerId,
+        dto.amount,
+        transaction._id.toString(),
+      );
     }
 
-    return transaction;
+    // Update daily summary projection
+    await this.projectionsService.recordDailyImpact({
+      userId: new Types.ObjectId(userId),
+      date: transactionDate,
+      amount: dto.amount,
+      type: dto.type as 'debt' | 'payment',
+    });
+
+    // Decrypt amount for the response
+    const decryptedTransaction = transaction.toObject();
+    decryptedTransaction.amount = this.encryptionService.decrypt<number>(
+      decryptedTransaction.amount,
+    );
+
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG-SERVICE] TransactionsService.create() END`);
+    return decryptedTransaction;
   }
 
   async findAll(query: TransactionQueryDto, userId: string) {
@@ -69,62 +106,77 @@ export class TransactionsService {
       matchStage.type = type;
     }
 
-    // Count unique customers with matching transactions
-    const countResult = await this.transactionModel.aggregate([
-      { $match: matchStage },
-      { $group: { _id: '$customerId' } },
-      { $count: 'total' },
-    ]);
+    // Fetch raw transactions — amounts are encrypted in DB, decrypted by plugin
+    const transactions = await this.transactionModel
+      .find(matchStage)
+      .sort({ date: -1, createdAt: -1 })
+      .lean();
 
-    const total = countResult[0]?.total ?? 0;
+    // Decrypt amounts explicitly (plugin handles init/find hooks, but lean()
+    // with explicit transforms needs care)
+    const decryptedTransactions = transactions.map((tx: any) => ({
+      ...tx,
+      amount: this.encryptionService.decrypt<number>(
+        tx.amount ?? 'v1:aaaa:aaaa:MA==',
+      ),
+    }));
 
-    // Aggregate transactions grouped by customer with pagination
-    const grouped = await this.transactionModel.aggregate([
-      { $match: matchStage },
-      { $sort: { date: -1, createdAt: -1 } },
-      {
-        $group: {
-          _id: '$customerId',
-          transactions: {
-            $push: {
-              _id: '$_id',
-              type: '$type',
-              amount: '$amount',
-              note: '$note',
-              date: '$date',
-              createdAt: '$createdAt',
-              updatedAt: '$updatedAt',
-            },
-          },
-          lastDate: { $first: '$date' },
-          lastCreatedAt: { $first: '$createdAt' },
+    // Application-level grouping by customer
+    const customerMap = new Map<string, any>();
+    const customerIds = Array.from(
+      new Set(decryptedTransactions.map((tx) => tx.customerId.toString())),
+    );
+
+    // Fetch customer names in one query
+    const customers = await this.customersService['customerModel']
+      .find({
+        _id: { $in: customerIds.map((id) => new Types.ObjectId(id)) },
+        isDeleted: false,
+      })
+      .select('fullName phone balance hasDebt')
+      .lean();
+
+    const customerInfoMap = new Map(
+      customers.map((c: any) => [
+        c._id.toString(),
+        {
+          fullName: c.fullName,
+          phone: c.phone,
+          balance: this.encryptionService.decrypt<number>(
+            c.balance ?? 'v1:aaaa:aaaa:MA==',
+          ),
+          hasDebt: c.hasDebt,
         },
-      },
-      { $sort: { lastDate: -1, lastCreatedAt: -1 } },
-      { $skip: skip },
-      { $limit: limit },
-      {
-        $lookup: {
-          from: 'customers',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'customer',
-        },
-      },
-      { $unwind: '$customer' },
-      {
-        $project: {
-          _id: { $toString: '$_id' },
-          fullName: '$customer.fullName',
-          phone: '$customer.phone',
-          balance: '$customer.balance',
-          transactions: 1,
-        },
-      },
-    ]);
+      ]),
+    );
+
+    for (const tx of decryptedTransactions) {
+      const cid = tx.customerId.toString();
+      if (!customerMap.has(cid)) {
+        customerMap.set(cid, {
+          _id: cid,
+          ...customerInfoMap.get(cid),
+          transactions: [],
+        });
+      }
+      customerMap.get(cid).transactions.push({
+        _id: tx._id,
+        type: tx.type,
+        amount: tx.amount,
+        note: tx.note,
+        date: tx.date,
+        createdAt: tx.createdAt,
+        updatedAt: tx.updatedAt,
+      });
+    }
+
+    // Apply pagination at the customer-group level
+    const grouped = Array.from(customerMap.values());
+    const total = grouped.length;
+    const paginated = grouped.slice(skip, skip + limit);
 
     return {
-      items: grouped,
+      items: paginated,
       meta: {
         page,
         limit,
@@ -148,10 +200,30 @@ export class TransactionsService {
       throw new NotFoundException('Transaction not found');
     }
 
-    return transaction;
+    // Decrypt amount
+    const decrypted = {
+      ...transaction,
+      amount: this.encryptionService.decrypt<number>(
+        (transaction as any).amount ?? 'v1:aaaa:aaaa:MA==',
+      ),
+    };
+
+    // Decrypt populated customer balance
+    if ((decrypted as any).customerId) {
+      const customer = (decrypted as any).customerId;
+      if (typeof customer === 'object' && customer.balance !== undefined) {
+        customer.balance = this.encryptionService.decrypt<number>(
+          customer.balance ?? 'v1:aaaa:aaaa:MA==',
+        );
+      }
+    }
+
+    return decrypted;
   }
 
   async update(id: string, dto: UpdateTransactionDto, userId: string) {
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG-SERVICE] TransactionsService.update() START id=${id}`);
     const transaction = await this.transactionModel.findOne({
       _id: new Types.ObjectId(id),
       createdBy: new Types.ObjectId(userId),
@@ -162,44 +234,41 @@ export class TransactionsService {
       throw new NotFoundException('Transaction not found');
     }
 
+    const oldAmount = this.encryptionService.decrypt<number>(
+      transaction.amount,
+    );
+    const oldType = transaction.type;
+    const oldCustomerId = transaction.customerId.toString();
+
     // Rollback the old transaction's effect on balance
-    if (transaction.type === TransactionType.DEBT) {
-      await this.customersService.rollbackDebt(
-        transaction.customerId.toString(),
-        transaction.amount,
-      );
+    if (oldType === TransactionType.DEBT) {
+      await this.customersService.rollbackDebt(oldCustomerId, oldAmount);
     } else {
-      await this.customersService.rollbackPayment(
-        transaction.customerId.toString(),
-        transaction.amount,
-      );
+      await this.customersService.rollbackPayment(oldCustomerId, oldAmount);
     }
 
     // Apply new transaction's effect
-    const newType = dto.type ?? transaction.type;
-    const newAmount = dto.amount ?? transaction.amount;
+    const newType = dto.type ?? oldType;
+    const newAmount = dto.amount ?? oldAmount;
     const newCustomerId = dto.customerId
       ? new Types.ObjectId(dto.customerId)
       : transaction.customerId;
 
     // If customer changed, verify the new customer exists
-    if (dto.customerId && dto.customerId !== transaction.customerId.toString()) {
+    if (
+      dto.customerId &&
+      dto.customerId !== transaction.customerId.toString()
+    ) {
       const customer = await this.customersService.findOne(
         dto.customerId,
         userId,
       );
       if (!customer) {
         // Re-apply the old effect since we already rolled it back
-        if (transaction.type === TransactionType.DEBT) {
-          await this.customersService.increaseDebt(
-            transaction.customerId.toString(),
-            transaction.amount,
-          );
+        if (oldType === TransactionType.DEBT) {
+          await this.customersService.increaseDebt(oldCustomerId, oldAmount);
         } else {
-          await this.customersService.increasePayment(
-            transaction.customerId.toString(),
-            transaction.amount,
-          );
+          await this.customersService.increasePayment(oldCustomerId, oldAmount);
         }
         throw new NotFoundException('Customer not found');
       }
@@ -220,8 +289,14 @@ export class TransactionsService {
 
     // Update transaction fields
     transaction.type = newType;
-    transaction.amount = newAmount;
+    transaction.amount = newAmount as any; // plugin encrypts on save
     transaction.customerId = newCustomerId;
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `[DEBUG-SERVICE] TransactionsService.update() BEFORE save(). ` +
+        `assigned amount=${JSON.stringify(transaction.amount)}`,
+    );
 
     if (dto.note !== undefined) {
       transaction.note = dto.note ?? null;
@@ -235,7 +310,19 @@ export class TransactionsService {
 
     await transaction.save();
 
-    return transaction;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[DEBUG-SERVICE] TransactionsService.update() AFTER save(). ` +
+        `saved amount=${JSON.stringify((transaction as any).amount)}`,
+    );
+
+    // Decrypt for response
+    const decrypted = transaction.toObject();
+    decrypted.amount = this.encryptionService.decrypt<number>(decrypted.amount);
+
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG-SERVICE] TransactionsService.update() END`);
+    return decrypted;
   }
 
   async remove(id: string, userId: string): Promise<void> {
@@ -249,15 +336,17 @@ export class TransactionsService {
       throw new NotFoundException('Transaction not found');
     }
 
+    const amount = this.encryptionService.decrypt<number>(transaction.amount);
+
     if (transaction.type === TransactionType.DEBT) {
       await this.customersService.rollbackDebt(
         transaction.customerId.toString(),
-        transaction.amount,
+        amount,
       );
     } else {
       await this.customersService.rollbackPayment(
         transaction.customerId.toString(),
-        transaction.amount,
+        amount,
       );
     }
 

@@ -14,7 +14,8 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
-import { CustomerQueryDto } from './dto/customer-query.dto';
+import { GetCustomersQueryDto } from './dto/get-customers-query.dto';
+import { UpdateReminderSettingsDto } from '../reminders/dto/update-reminder-settings.dto';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -45,16 +46,24 @@ export class CustomersController {
 
   @Get()
   @ApiOperation({
-    summary: 'Get customers',
+    summary: 'Get customers with filtering, search, sort, and pagination',
   })
   findAll(
     @Query()
-    query: CustomerQueryDto,
+    query: GetCustomersQueryDto,
 
     @CurrentUser()
     user: JwtPayload,
   ) {
     return this.customersService.findAll(query, user.sub);
+  }
+
+  @Get('locations')
+  @ApiOperation({
+    summary: 'Get unique customer locations',
+  })
+  getLocations(@CurrentUser() user: JwtPayload) {
+    return this.customersService.getLocations(user.sub);
   }
 
   @Get(':id')
@@ -86,6 +95,20 @@ export class CustomersController {
     user: JwtPayload,
   ) {
     return this.customersService.update(id, updateCustomerDto, user.sub);
+  }
+
+  @Patch(':id/reminder-settings')
+  @ApiOperation({
+    summary: 'Update customer reminder settings',
+    description:
+      'Enable or disable automatic WhatsApp reminders for this customer',
+  })
+  updateReminderSettings(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: UpdateReminderSettingsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.customersService.update(id, dto, user.sub);
   }
 
   @Delete(':id')
