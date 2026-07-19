@@ -21,6 +21,10 @@ export const envValidationSchema = Joi.object({
 
   ENCRYPTION_KEY_VERSION: Joi.string().default('1'),
 
-  FRONTEND_URL: Joi.string().uri().default(''),
+  FRONTEND_URL: Joi.alternatives().conditional('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().uri({ scheme: ['http', 'https'] }).required(),
+    otherwise: Joi.string().uri({ scheme: ['http', 'https'] }).optional(),
+  }),
 
 }).unknown();

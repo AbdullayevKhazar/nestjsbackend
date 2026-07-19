@@ -3,7 +3,8 @@ import { Response } from 'express';
 
 /**
  * Centralized cookie management for authentication tokens.
- * Enforces HttpOnly, SameSite=Lax, and Secure in production.
+ * Uses secure cross-site cookies in production so the Vercel frontend can
+ * authenticate with the backend through credentials-based requests.
  */
 @Injectable()
 export class CookieService {
@@ -11,7 +12,7 @@ export class CookieService {
 
   private readonly baseOptions = {
     httpOnly: true,
-    sameSite: 'lax' as const,
+    sameSite: this.isProduction ? ('none' as const) : ('lax' as const),
     secure: this.isProduction,
     path: '/',
   };
@@ -22,7 +23,7 @@ export class CookieService {
   setAccessTokenCookie(res: Response, token: string): void {
     res.cookie('access_token', token, {
       ...this.baseOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      maxAge: 15 * 60 * 1000,
     });
   }
 
@@ -32,7 +33,7 @@ export class CookieService {
   setRefreshTokenCookie(res: Response, token: string): void {
     res.cookie('refresh_token', token, {
       ...this.baseOptions,
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
   }
 
