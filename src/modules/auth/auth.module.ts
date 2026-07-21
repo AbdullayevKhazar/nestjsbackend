@@ -8,6 +8,7 @@ import { AuthService } from './auth.service';
 import { CookieService } from './cookie.service';
 import { jwtConfig } from 'src/config';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 
   controllers: [AuthController],
 
-  providers: [AuthService, CookieService, JwtStrategy],
+  providers: [AuthService, CookieService, JwtStrategy, JwtAuthGuard],
+  exports: [AuthService, CookieService, JwtStrategy, JwtAuthGuard],
 })
 export class AuthModule {}

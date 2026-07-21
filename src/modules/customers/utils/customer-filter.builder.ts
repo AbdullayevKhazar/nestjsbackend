@@ -14,6 +14,15 @@ import { Types } from 'mongoose';
 export class CustomerFilterBuilder {
   private conditions: Record<string, unknown>[] = [];
 
+  private normalizeBoolean(value?: boolean | string | null): boolean | null {
+    if (value === undefined || value === null || value === '') return null;
+    if (value === true || value === false) return value;
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+    return null;
+  }
+
   /**
    * Mandatory base filter: scoped to a user and non-deleted records.
    */
@@ -62,14 +71,15 @@ export class CustomerFilterBuilder {
    * This is an exact proxy because `hasDebt` is kept in sync with
    * balance > 0 by the business layer.
    */
-  withOverdue(overdue?: boolean): this {
-    if (overdue === undefined || overdue === null) return this;
+  withOverdue(overdue?: boolean | string | null): this {
+    const normalizedOverdue = this.normalizeBoolean(overdue);
+    if (normalizedOverdue === null) return this;
 
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     sevenDaysAgo.setHours(0, 0, 0, 0);
 
-    if (overdue === true) {
+    if (normalizedOverdue === true) {
       this.conditions.push({
         hasDebt: true,
         $or: [

@@ -21,10 +21,19 @@ export const envValidationSchema = Joi.object({
 
   ENCRYPTION_KEY_VERSION: Joi.string().default('1'),
 
+  WEBAUTHN_RP_NAME: Joi.string().optional(),
+  WEBAUTHN_RP_ID: Joi.string().optional(),
+  WEBAUTHN_ORIGIN: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .optional(),
+
   FRONTEND_URL: Joi.alternatives().conditional('NODE_ENV', {
     is: 'production',
-    then: Joi.string().uri({ scheme: ['http', 'https'] }).required(),
-    otherwise: Joi.string().uri({ scheme: ['http', 'https'] }).optional(),
+    then: Joi.string()
+      .uri({ scheme: ['http', 'https'] })
+      .required(),
+    otherwise: Joi.string()
+      .uri({ scheme: ['http', 'https'] })
+      .optional(),
   }),
-
 }).unknown();

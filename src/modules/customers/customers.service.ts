@@ -30,6 +30,7 @@ import {
   computeTotalDebt,
   sortByFieldInMemory,
   paginateInMemory,
+  filterCustomersByOverdue,
 } from './utils/customer-response.mapper';
 import type {
   PaginatedListResponse,
@@ -93,12 +94,46 @@ export class CustomersService {
   ): Promise<PaginatedListResponse<DecryptedCustomer>> {
     const { page, limit, search, location, sort, overdue } = query;
 
-    // Build filter dynamically using the chainable builder
+    // Build base filter dynamically using the chainable builder
+    const baseFilter = new CustomerFilterBuilder()
+      .withUser(userId)
+      .withSearch(search)
+      .withLocation(location)
+      .build();
+
+    const sortConfig = getSortFieldAndDirection(sort);
+
+    if (overdue !== undefined && overdue !== null) {
+      const rawCustomers = await this.customerModel.find(baseFilter).lean();
+      const decrypted = decryptCustomers(
+        rawCustomers as any,
+        this.encryptionService,
+      );
+      const filtered = filterCustomersByOverdue(decrypted, overdue);
+      const sorted = sortByFieldInMemory(
+        filtered,
+        sortConfig.field,
+        sortConfig.direction,
+      );
+      const items = paginateInMemory(sorted, page, limit);
+      const totalDebt = computeTotalDebt(items);
+
+      return {
+        summary: { totalDebt },
+        items,
+        meta: {
+          page,
+          limit,
+          total: filtered.length,
+          totalPages: Math.ceil(filtered.length / limit),
+        },
+      };
+    }
+
     const filter = new CustomerFilterBuilder()
       .withUser(userId)
       .withSearch(search)
       .withLocation(location)
-      .withOverdue(overdue)
       .build();
 
     // Strategy 1: MongoDB-native sort (non-encrypted fields)
@@ -144,8 +179,11 @@ export class CustomersService {
       this.encryptionService,
     );
 
-    const { field, direction } = getSortFieldAndDirection(sort);
-    const sorted = sortByFieldInMemory(decrypted, field, direction);
+    const sorted = sortByFieldInMemory(
+      decrypted,
+      sortConfig.field,
+      sortConfig.direction,
+    );
     const items = paginateInMemory(sorted, page, limit);
     const totalDebt = computeTotalDebt(items);
     return {

@@ -13,6 +13,7 @@ import {
   TransactionDocument,
 } from '../transactions/schemas/transaction.schema';
 import { EncryptionService } from '../encryption/encryption.service';
+import { isOverdueCustomer } from '../customers/utils/customer-response.mapper';
 
 @Injectable()
 export class PublicService {
@@ -62,14 +63,6 @@ export class PublicService {
       customer.balance ?? 'v1:aaaa:aaaa:MA==',
     );
 
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    const isOverdue =
-      balance > 0 &&
-      (!customer.lastTransactionAt ||
-        customer.lastTransactionAt < sevenDaysAgo);
-
     return {
       customer: {
         id: customer._id,
@@ -78,7 +71,7 @@ export class PublicService {
         location: customer.location,
         note: customer.note,
         balance,
-        isOverdue,
+        isOverdue: isOverdueCustomer(customer),
       },
       transactions: decryptedTransactions,
     };

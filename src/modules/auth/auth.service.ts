@@ -52,22 +52,7 @@ export class AuthService {
     };
   }
 
-  async login(loginDto: LoginDto) {
-    const user = await this.userService.findByEmail(loginDto.email);
-
-    if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
-    const isPasswordValid = await bcrypt.compare(
-      loginDto.password,
-      user.password,
-    );
-
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
+  async createSession(user: UserDocument) {
     const tokens = await this.generateTokens(user);
 
     const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
@@ -87,6 +72,25 @@ export class AuthService {
         email: user.email,
       },
     };
+  }
+
+  async login(loginDto: LoginDto) {
+    const user = await this.userService.findByEmail(loginDto.email);
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    const isPasswordValid = await bcrypt.compare(
+      loginDto.password,
+      user.password,
+    );
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    return this.createSession(user);
   }
 
   async refresh(refreshToken: string) {

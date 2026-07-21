@@ -4,6 +4,22 @@ import type {
   DecryptedCustomer,
 } from '../interfaces/customer-list.interface';
 
+export function isOverdueCustomer(
+  customer: Pick<RawCustomer, 'hasDebt' | 'lastPaymentAt'> | {
+    hasDebt?: boolean;
+    lastPaymentAt?: Date | string | null;
+  },
+): boolean {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  sevenDaysAgo.setHours(0, 0, 0, 0);
+
+  return (
+    customer.hasDebt === true &&
+    (!customer.lastPaymentAt || new Date(customer.lastPaymentAt) < sevenDaysAgo)
+  );
+}
+
 /**
  * Maps a raw MongoDB customer document to a decrypted customer DTO.
  *
@@ -18,14 +34,6 @@ export function decryptCustomer(
     raw.balance ?? 'v1:aaaa:aaaa:MA==',
   );
 
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  sevenDaysAgo.setHours(0, 0, 0, 0);
-
-  const overdue =
-    balance > 0 &&
-    (!raw.lastPaymentAt || new Date(raw.lastPaymentAt) < sevenDaysAgo);
-
   return {
     ...raw,
     balance,
@@ -35,7 +43,7 @@ export function decryptCustomer(
     totalPaid: encryptionService.decrypt<number>(
       raw.totalPaid ?? 'v1:aaaa:aaaa:MA==',
     ),
-    overdue,
+    overdue: isOverdueCustomer(raw),
   };
 }
 
@@ -71,13 +79,48 @@ export function sortByFieldInMemory<T>(
   direction: 1 | -1,
 ): T[] {
   return items.sort((a, b) => {
-    const aVal = ((a as Record<string, unknown>)[field] as number) ?? 0;
-    const bVal = ((b as Record<string, unknown>)[field] as number) ?? 0;
+    const aVal = (a as Record<string, unknown>)[field];
+    const bVal = (b as Record<string, unknown>)[field];
 
     if (aVal === bVal) return 0;
-    const cmp = aVal < bVal ? -1 : 1;
+    if (aVal === undefined || aVal === null) return direction === 1 ? -1 : 1;
+    if (bVal === undefined || bVal === null) return direction === 1 ? 1 : -1;
+
+    const left = aVal instanceof Date ? aVal.getTime() : aVal;
+    const right = bVal instanceof Date ? bVal.getTime() : bVal;
+    const cmp =
+      typeof left === 'string' && typeof right === 'string'
+        ? left.localeCompare(right)
+        : (left as number) < (right as number)
+          ? -1
+          : 1;
     return direction === 1 ? cmp : -cmp;
   });
+}
+
+export function filterCustomersByOverdue<T extends { overdue?: boolean }>(
+  customers: T[],
+  overdue?: boolean | string | null,
+): T[] {
+  if (overdue === undefined || overdue === null || overdue === '') return customers;
+
+  const normalized =
+    overdue === true ||
+    overdue === 'true' ||
+    overdue === '1' ||
+    overdue === 'yes' ||
+    overdue === 'on'
+      ? true
+      : overdue === false ||
+          overdue === 'false' ||
+          overdue === '0' ||
+          overdue === 'no' ||
+          overdue === 'off'
+        ? false
+        : null;
+
+  if (normalized === null) return customers;
+  return customers.filter((customer) => customer.overdue === normalized);
 }
 
 /**

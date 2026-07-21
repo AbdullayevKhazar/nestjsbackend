@@ -17,6 +17,7 @@ import { EncryptionModule } from './modules/encryption/encryption.module';
 import { FinancialEventsModule } from './modules/events/financial-events.module';
 import { MigrationModule } from './modules/migration/migration.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
+import { WebAuthnModule } from './modules/auth/webauthn/webauthn.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
     FinancialEventsModule,
     MigrationModule,
     RemindersModule,
+    WebAuthnModule,
   ],
 })
 export class AppModule {}
